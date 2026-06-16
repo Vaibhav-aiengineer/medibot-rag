@@ -4,7 +4,16 @@ from sentence_transformers import (
 )
 
 from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Filter,
+    FieldCondition,
+    MatchAny
+)
 
+
+# -----------------------------
+# Models
+# -----------------------------
 
 embedding_model = SentenceTransformer(
     "BAAI/bge-small-en-v1.5"
@@ -18,7 +27,19 @@ client = QdrantClient(
     path="./qdrant_data"
 )
 
-def retrieve(question, top_k=5):
+
+# -----------------------------
+# Config
+# -----------------------------
+
+MIN_RERANK_SCORE = 1.0
+
+
+# -----------------------------
+# Retrieval
+# -----------------------------
+
+def retrieve(question, role, top_k=5):
 
     query_vector = embedding_model.encode(
         question,
@@ -27,9 +48,26 @@ def retrieve(question, top_k=5):
 
     results = client.query_points(
         collection_name="medibot",
+
         query=query_vector,
+
+        query_filter=Filter(
+            must=[
+                FieldCondition(
+                    key="access_roles",
+                    match=MatchAny(
+                        any=[role]
+                    )
+                )
+            ]
+        ),
+
         limit=20
     ).points
+
+
+    if not results:
+        return []
 
     pairs = [
         (question, result.payload["text"])
@@ -55,19 +93,39 @@ def retrieve(question, top_k=5):
         reverse=True
     )
 
+
+    if reranked[0]["score"] < MIN_RERANK_SCORE:
+
+        print(
+            f"Top score below threshold "
+            f"({MIN_RERANK_SCORE})"
+        )
+
+        return []
+
     return reranked[:top_k]
+
+
+# -----------------------------
+# Local Test
+# -----------------------------
 
 if __name__ == "__main__":
 
     question = "What is the standard dose of Amoxicillin?"
 
-    results = retrieve(question)
+    results = retrieve(
+        question=question,
+        role="doctor"
+    )
 
     for result in results:
 
-        print("\n===================")
+        print("\n====================")
 
-        print(result["score"])
+        print(
+            f"Score: {result['score']:.4f}"
+        )
 
         print(result["text"])
 

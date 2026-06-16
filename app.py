@@ -1,26 +1,41 @@
 from retrieval.rag_retriever import retrieve
 from llm.generator import generate_answer
 
+role = input(
+    "Role (doctor/nurse/billing/admin/technician): "
+).lower()
 
-question = "What is the standard dose of Amoxicillin?"
+while True:
 
+    question = input(
+        "\nAsk a question (q to quit): "
+    )
 
-chunks = retrieve(
-    question,
-    top_k=5
-)
+    if question.lower() == "q":
 
-result = generate_answer(
-    question,
-    chunks
-)
+        print("\nGoodbye!")
 
-print("\nANSWER:\n")
+        break
 
-print(result["answer"])
+    chunks = retrieve(
+        question=question,
+        role=role,
+        top_k=5
+    )
 
-print("\nSOURCES:\n")
+    result = generate_answer(
+        question,
+        chunks
+    )
 
-for source in result["sources"]:
+    print("\nANSWER:\n")
 
-    print(source)
+    print(result["answer"])
+
+    if result["sources"]:
+
+        print("\nSOURCES:\n")
+
+        for source in result["sources"]:
+
+            print(f"- {source}")
