@@ -10,6 +10,14 @@ client = Groq(
 )
 
 
+# Exact fallback the model is told to return when the answer is not
+# in the context. Kept as a constant so the prompt and the
+# source-suppression check stay in sync.
+NOT_FOUND_MESSAGE = (
+    "I could not find this information in the knowledge base."
+)
+
+
 def generate_answer(question, chunks):
 
     context = ""
@@ -73,8 +81,8 @@ Tone:
 - Suitable for healthcare staff referencing hospital protocols.
 
 If the answer is not present in the context, reply exactly:
-"I could not find this information in the knowledge base."
-"""
+"{NOT_FOUND_MESSAGE}"
+""".format(NOT_FOUND_MESSAGE=NOT_FOUND_MESSAGE)
 
     user_prompt = f"""CONTEXT:
 
@@ -100,6 +108,11 @@ QUESTION:
     )
 
     answer = response.choices[0].message.content
+
+    # Don't cite sources for a non-answer: when the model reports it
+    # could not find the information, showing a source is misleading.
+    if NOT_FOUND_MESSAGE.lower() in (answer or "").lower():
+        sources = []
 
     return {
         "answer": answer,
