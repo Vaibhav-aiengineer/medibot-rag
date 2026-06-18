@@ -3,7 +3,9 @@ from sentence_transformers import (
     CrossEncoder
 )
 
-from qdrant_client import QdrantClient
+from vectorstore.qdrant_client import (
+    get_qdrant_client
+)
 from qdrant_client.models import (
     Filter,
     FieldCondition,
@@ -23,9 +25,6 @@ reranker = CrossEncoder(
     "cross-encoder/ms-marco-MiniLM-L-6-v2"
 )
 
-client = QdrantClient(
-    path="./qdrant_data"
-)
 
 
 # -----------------------------
@@ -41,92 +40,67 @@ MIN_RERANK_SCORE = 1.0
 
 def retrieve(question, role, top_k=5):
 
-    query_vector = embedding_model.encode(
-        question,
-        normalize_embeddings=True
-    ).tolist()
+    client = get_qdrant_client()
 
-    results = client.query_points(
-        collection_name="medibot",
+    try:
 
-        query=query_vector,
+        query_vector = embedding_model.encode(
+            question,
+            normalize_embeddings=True
+        ).tolist()
 
-        query_filter=Filter(
-            must=[
-                FieldCondition(
-                    key="access_roles",
-                    match=MatchAny(
-                        any=[role]
+        results = client.query_points(
+            collection_name="medibot",
+
+            query=query_vector,
+
+            query_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="access_roles",
+                        match=MatchAny(
+                            any=[role]
+                        )
                     )
-                )
-            ]
-        ),
+                ]
+            ),
 
-        limit=20
-    ).points
+            limit=20
+        ).points
 
+        if not results:
+            return []
 
-    if not results:
-        return []
+        pairs = [
+            (question, result.payload["text"])
+            for result in results
+        ]
 
-    pairs = [
-        (question, result.payload["text"])
-        for result in results
-    ]
+        scores = reranker.predict(pairs)
 
-    scores = reranker.predict(pairs)
+        reranked = []
 
-    reranked = []
+        for result, score in zip(results, scores):
 
-    for result, score in zip(results, scores):
+            reranked.append(
+                {
+                    "score": float(score),
+                    "text": result.payload["text"],
+                    "metadata": result.payload
+                }
+            )
 
-        reranked.append(
-            {
-                "score": float(score),
-                "text": result.payload["text"],
-                "metadata": result.payload
-            }
+        reranked.sort(
+            key=lambda x: x["score"],
+            reverse=True
         )
 
-    reranked.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
+        if reranked[0]["score"] < MIN_RERANK_SCORE:
 
+            return []
 
-    if reranked[0]["score"] < MIN_RERANK_SCORE:
+        return reranked[:top_k]
 
-        print(
-            f"Top score below threshold "
-            f"({MIN_RERANK_SCORE})"
-        )
+    finally:
 
-        return []
-
-    return reranked[:top_k]
-
-
-# -----------------------------
-# Local Test
-# -----------------------------
-
-if __name__ == "__main__":
-
-    question = "What is the standard dose of Amoxicillin?"
-
-    results = retrieve(
-        question=question,
-        role="doctor"
-    )
-
-    for result in results:
-
-        print("\n====================")
-
-        print(
-            f"Score: {result['score']:.4f}"
-        )
-
-        print(result["text"])
-
-    client.close()
+        client.close()
