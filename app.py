@@ -20,7 +20,7 @@ while True:
     chunks = retrieve(
         question=question,
         role=role,
-        top_k=5
+        top_k=3
     )
 
     result = generate_answer(

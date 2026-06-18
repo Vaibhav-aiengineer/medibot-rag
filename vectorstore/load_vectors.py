@@ -1,49 +1,66 @@
 import json
 
-from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-
-print("Connecting to Qdrant...")
-
-client = QdrantClient(
-    path="./qdrant_data"
+from vectorstore.client_manager import get_qdrant_client
+from vectorstore.qdrant_store import create_collection
+from retrieval.encoders import (
+    COLLECTION_NAME,
+    DENSE_VECTOR,
+    SPARSE_VECTOR,
+    embed_dense,
+    embed_sparse,
 )
 
-print("Loading embeddings...")
 
-with open(
-    "data/embeddings.json",
-    "r",
-    encoding="utf-8"
-) as f:
+def main():
 
-    embeddings = json.load(f)
+    print("Recreating collection...")
+    create_collection()
 
-print(f"Found {len(embeddings)} vectors")
+    print("Loading chunks...")
+    with open("data/chunks.json", "r", encoding="utf-8") as f:
+        chunks = json.load(f)
 
-points = []
+    print(f"Found {len(chunks)} chunks")
 
-for item in embeddings:
+    points = []
 
-    points.append(
-        PointStruct(
-            id=item["id"],
-            vector=item["embedding"],
-            payload={
-                "text": item["text"],
-                **item["metadata"]
-            }
+    for index, chunk in enumerate(chunks):
+
+        text = chunk["text"]
+
+        points.append(
+            PointStruct(
+                id=chunk["id"],
+                vector={
+                    DENSE_VECTOR: embed_dense(text),
+                    SPARSE_VECTOR: embed_sparse(text),
+                },
+                payload={
+                    "text": text,
+                    **chunk["metadata"],
+                },
+            )
         )
-    )
 
-print("Uploading vectors...")
+        if (index + 1) % 50 == 0:
+            print(f"  Encoded {index + 1} chunks")
 
-client.upsert(
-    collection_name="medibot",
-    points=points
-)
+    print("Uploading vectors...")
 
-print("Upload Complete")
+    client = get_qdrant_client()
 
-client.close()
+    try:
+        client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=points,
+        )
+    finally:
+        client.close()
+
+    print(f"Upload complete: {len(points)} points")
+
+
+if __name__ == "__main__":
+    main()

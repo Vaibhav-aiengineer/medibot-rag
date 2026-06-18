@@ -1,113 +1,119 @@
 from pathlib import Path
 import uuid
 
+from docling.chunking import HybridChunker
+from docling_core.transforms.chunker.tokenizer.huggingface import (
+    HuggingFaceTokenizer,
+)
+from docling_core.types.doc.labels import DocItemLabel
+from transformers import AutoTokenizer
 
+
+# Role-based access control by source folder (collection).
 ROLE_MAPPING = {
     "clinical": ["doctor", "admin"],
     "billing": ["billing_executive", "admin"],
     "nursing": ["nurse", "doctor", "admin"],
     "equipment": ["technician", "admin"],
-    "general": ["all"]
+    "general": ["all"],
 }
 
-
-def create_table_chunk(headers, row):
-
-    lines = []
-
-    for header, cell in zip(headers, row):
-
-        lines.append(
-            f"{header}: {cell.text}"
-        )
-
-    return "\n".join(lines)
+# Embedding model whose tokenizer drives the token-aware size limit.
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+MAX_TOKENS = 512
 
 
-def create_chunk(text, document_path):
+def get_chunker():
+    """
+    Build a Docling HybridChunker.
+
+    HybridChunker first splits along the document's natural
+    structure (section -> subsection -> paragraph / table), then
+    applies a token-aware second pass: oversized elements are split
+    and undersized peers under the same heading are merged, all
+    bounded by the embedding model's token limit.
+    """
+
+    tokenizer = HuggingFaceTokenizer(
+        tokenizer=AutoTokenizer.from_pretrained(EMBEDDING_MODEL),
+        max_tokens=MAX_TOKENS,
+    )
+
+    return HybridChunker(
+        tokenizer=tokenizer,
+        merge_peers=True,
+    )
+
+
+def _chunk_type(chunk):
+    """
+    Classify a chunk by the doc items it contains so structured
+    content (tables, code) can be told apart from prose.
+    """
+
+    labels = {item.label for item in chunk.meta.doc_items}
+
+    if DocItemLabel.TABLE in labels:
+        return "table"
+
+    if DocItemLabel.CODE in labels:
+        return "code"
+
+    return "section"
+
+
+def _section_title(chunk):
+    """
+    Most specific parent heading for the chunk, falling back to the
+    document title when no sub-heading is present.
+    """
+
+    headings = chunk.meta.headings or []
+
+    if headings:
+        return headings[-1]
+
+    return "Untitled"
+
+
+def chunk_document(document, document_path, chunker):
+    """
+    Convert a parsed Docling document into chunk records.
+
+    The stored ``text`` is the *contextualised* chunk: HybridChunker
+    prepends the parent section heading(s), so each chunk's embedded
+    text carries its structural context.
+    """
 
     collection = Path(document_path).parent.name
 
-    return {
-    "id": str(uuid.uuid4()),
-
-    "text": text,
-
-    "metadata": {
-
-        "document": Path(document_path).name,
-
-        "collection": collection,
-
-        "access_roles": ROLE_MAPPING.get(
-            collection,
-            ["admin"]
-        ),
-
-        "chunk_type": "table_row"
-    }
-}
-
-def process_table(table, document_path):
-
     chunks = []
 
-    headers = [
-        cell.text
-        for cell in table.data.grid[0]
-    ]
+    for chunk in chunker.chunk(document):
 
-    for row in table.data.grid[1:]:
+        text = chunker.contextualize(chunk)
 
-        chunk_text = create_table_chunk(
-            headers,
-            row
-        )
-
-        chunk = create_chunk(
-            chunk_text,
-            document_path
-        )
-
-        chunk["metadata"]["section_title"] = ("Table Data")
-        
-        chunks.append(chunk)
-
-    return chunks
-
-def process_section_document(markdown, document_path):
-
-    chunks = []
-
-    sections = markdown.split("\n## ")
-
-    for section in sections:
-
-        section = section.strip()
-
-        if not section:
+        if not text.strip():
             continue
 
-        lines = section.split("\n")
+        headings = chunk.meta.headings or []
 
-        heading = lines[0].replace("#", "").strip()
-
-        content = "\n".join(lines[1:]).strip()
-
-        if not content:
-            continue
-
-        text = f"Section: {heading}\n\n{content}"
-
-        chunk = create_chunk(
-            text,
-            document_path
+        chunks.append(
+            {
+                "id": str(uuid.uuid4()),
+                "text": text,
+                "metadata": {
+                    "document": Path(document_path).name,
+                    "collection": collection,
+                    "access_roles": ROLE_MAPPING.get(
+                        collection,
+                        ["admin"],
+                    ),
+                    "chunk_type": _chunk_type(chunk),
+                    "section_title": _section_title(chunk),
+                    "headings": headings,
+                },
+            }
         )
-
-        chunk["metadata"]["chunk_type"] = ("section")
-
-        chunk["metadata"]["section_title"] = (heading)
-
-        chunks.append(chunk)
 
     return chunks
