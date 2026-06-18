@@ -3,7 +3,7 @@ from sentence_transformers import (
     CrossEncoder
 )
 
-from vectorstore.qdrant_client import (
+from vectorstore.client_manager import (
     get_qdrant_client
 )
 from qdrant_client.models import (
@@ -12,6 +12,9 @@ from qdrant_client.models import (
     MatchAny
 )
 
+from retrieval.bm25_retriever import (
+    retrieve_bm25
+)
 
 # -----------------------------
 # Models
@@ -44,12 +47,16 @@ def retrieve(question, role, top_k=5):
 
     try:
 
+        # ----------------------------------
+        # Dense Retrieval (Qdrant)
+        # ----------------------------------
+
         query_vector = embedding_model.encode(
             question,
             normalize_embeddings=True
         ).tolist()
 
-        results = client.query_points(
+        qdrant_results = client.query_points(
             collection_name="medibot",
 
             query=query_vector,
@@ -68,25 +75,101 @@ def retrieve(question, role, top_k=5):
             limit=20
         ).points
 
-        if not results:
+        dense_results = []
+
+        for result in qdrant_results:
+
+            dense_results.append(
+                {
+                    "text": result.payload["text"],
+                    "metadata": result.payload
+                }
+            )
+
+        # ----------------------------------
+        # BM25 Retrieval
+        # ----------------------------------
+
+        bm25_results = retrieve_bm25(
+            question=question,
+            role=role,
+            top_k=20
+        )
+
+        # ----------------------------------
+        # Merge Results
+        # ----------------------------------
+
+        combined_results = (
+            dense_results +
+            bm25_results
+        )
+
+        # ----------------------------------
+        # Remove Duplicates
+        # ----------------------------------
+
+        seen = set()
+
+        unique_results = []
+
+        for result in combined_results:
+
+            text = result["text"]
+
+            if text in seen:
+                continue
+
+            seen.add(text)
+
+            unique_results.append(result)
+
+        if not unique_results:
             return []
 
+        print(
+            f"Dense Results: {len(dense_results)}"
+        )
+
+        print(
+            f"BM25 Results: {len(bm25_results)}"
+        )
+
+        print(
+            f"Unique Results: {len(unique_results)}"
+        )
+
+        # ----------------------------------
+        # Reranking
+        # ----------------------------------
+
         pairs = [
-            (question, result.payload["text"])
-            for result in results
+
+            (
+                question,
+                result["text"]
+            )
+
+            for result in unique_results
         ]
 
-        scores = reranker.predict(pairs)
+        scores = reranker.predict(
+            pairs
+        )
 
         reranked = []
 
-        for result, score in zip(results, scores):
+        for result, score in zip(
+            unique_results,
+            scores
+        ):
 
             reranked.append(
                 {
                     "score": float(score),
-                    "text": result.payload["text"],
-                    "metadata": result.payload
+                    "text": result["text"],
+                    "metadata":
+                        result["metadata"]
                 }
             )
 
@@ -96,6 +179,11 @@ def retrieve(question, role, top_k=5):
         )
 
         if reranked[0]["score"] < MIN_RERANK_SCORE:
+
+            print(
+                f"Top score below threshold "
+                f"({MIN_RERANK_SCORE})"
+            )
 
             return []
 

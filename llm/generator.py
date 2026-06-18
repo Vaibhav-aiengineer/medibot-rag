@@ -14,30 +14,69 @@ def generate_answer(question, chunks):
 
     context = ""
 
-    sources = set()
+    sources = []
+
+    seen = set()
 
     for chunk in chunks:
 
-        source = chunk["metadata"]["document"]
+        metadata = chunk["metadata"]
 
-        sources.add(source)
+        # Deduplicate by document + collection
+        source_key = (
+            metadata["document"],
+            metadata["collection"]
+        )
+
+        if source_key not in seen:
+
+            seen.add(source_key)
+
+            sources.append(
+                {
+                    "source_document":
+                        metadata["document"],
+
+                    "section_title":
+                        metadata.get(
+                            "section_title",
+                            "Unknown"
+                        ),
+
+                    "collection":
+                        metadata["collection"]
+                }
+            )
 
         context += (
-            f"[Source: {source}]\n"
+            f"[Source: "
+            f"{metadata['document']}]\n"
             f"{chunk['text']}\n\n"
         )
 
-    prompt = f"""
-You are a hospital assistant.
+    system_prompt = """You are MediBot, a professional hospital knowledge assistant.
 
-Answer ONLY using the provided context.
+Your job is to answer medical and hospital-related questions using ONLY the provided context.
 
-If the answer is not present in the context,
-say:
+Formatting rules:
+- Write a brief summary sentence first, then provide details.
+- Use **bold** for key terms, drug names, and important warnings.
+- Use numbered lists (1. 2. 3.) for sequential steps or procedures.
+- Use bullet points (- ) for non-sequential items or lists of options.
+- Use clear headings (### ) to separate distinct topics when the answer covers multiple areas.
+- Keep paragraphs short (2-3 sentences max).
+- Use line breaks between sections for readability.
+- Be concise — do not repeat information.
 
+Tone:
+- Professional, clear, and reassuring.
+- Suitable for healthcare staff referencing hospital protocols.
+
+If the answer is not present in the context, reply exactly:
 "I could not find this information in the knowledge base."
+"""
 
-CONTEXT:
+    user_prompt = f"""CONTEXT:
 
 {context}
 
@@ -50,8 +89,12 @@ QUESTION:
         model="openai/gpt-oss-20b",
         messages=[
             {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
                 "role": "user",
-                "content": prompt
+                "content": user_prompt
             }
         ]
     )
@@ -60,5 +103,5 @@ QUESTION:
 
     return {
         "answer": answer,
-        "sources": list(sources)
+        "sources": sources
     }

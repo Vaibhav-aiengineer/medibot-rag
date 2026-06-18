@@ -4,7 +4,7 @@ import uuid
 
 ROLE_MAPPING = {
     "clinical": ["doctor", "admin"],
-    "billing": ["billing", "admin"],
+    "billing": ["billing_executive", "admin"],
     "nursing": ["nurse", "doctor", "admin"],
     "equipment": ["technician", "admin"],
     "general": ["all"]
@@ -69,6 +69,8 @@ def process_table(table, document_path):
             document_path
         )
 
+        chunk["metadata"]["section_title"] = ("Table Data")
+        
         chunks.append(chunk)
 
     return chunks
@@ -102,7 +104,9 @@ def process_section_document(markdown, document_path):
             document_path
         )
 
-        chunk["metadata"]["chunk_type"] = "section"
+        chunk["metadata"]["chunk_type"] = ("section")
+
+        chunk["metadata"]["section_title"] = (heading)
 
         chunks.append(chunk)
 

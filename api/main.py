@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.models import (
     ChatRequest,
@@ -11,8 +12,28 @@ from api.roles import ROLE_COLLECTIONS
 from retrieval.rag_retriever import retrieve
 from llm.generator import generate_answer
 
+from sql_rag.query_router import (
+    is_sql_question
+)
+
+from sql_rag.access_control import (
+    can_use_sql
+)
+
+from sql_rag.text_to_sql import (
+    run_text_to_sql
+)
+
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -78,6 +99,76 @@ def get_collections(role: str):
 @app.post("/chat")
 def chat(request: ChatRequest):
 
+    # ==================================
+    # SQL RAG PATH
+    # ==================================
+
+    if is_sql_question(
+        request.question
+    ):
+
+        if not can_use_sql(
+            request.role
+        ):
+
+            return {
+                "answer":
+                    f"As a {request.role}, "
+                    f"you do not have access to "
+                    f"analytical claim data.",
+
+                "sources": [],
+
+                "retrieval_type":
+                    "sql_rag",
+
+                "role":
+                    request.role
+            }
+
+        try:
+
+            sql_result = run_text_to_sql(
+                request.question
+            )
+
+            return {
+
+                "answer":
+                    sql_result["answer"],
+
+                "sources": [],
+
+                "retrieval_type":
+                    "sql_rag",
+
+                "role":
+                    request.role,
+
+                "generated_sql":
+                    sql_result["sql"]
+            }
+
+        except Exception as e:
+
+            return {
+
+                "answer":
+                    f"SQL Error: {str(e)}",
+
+                "sources": [],
+
+                "retrieval_type":
+                    "sql_rag",
+
+                "role":
+                    request.role
+            }
+
+    # ==================================
+    # HYBRID RAG PATH
+    # ==================================
+
     chunks = retrieve(
         question=request.question,
         role=request.role,
@@ -87,6 +178,7 @@ def chat(request: ChatRequest):
     if not chunks:
 
         return {
+
             "answer":
                 "I could not find this information in the knowledge base.",
 
