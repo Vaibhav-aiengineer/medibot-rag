@@ -1,4 +1,6 @@
-from qdrant_client.http.exceptions import UnexpectedResponse
+import shutil
+from pathlib import Path
+
 from qdrant_client.models import (
     Distance,
     VectorParams,
@@ -6,7 +8,10 @@ from qdrant_client.models import (
     PayloadSchemaType,
 )
 
-from vectorstore.client_manager import get_qdrant_client
+from vectorstore.client_manager import (
+    get_qdrant_client,
+    QDRANT_PATH,
+)
 from retrieval.encoders import (
     COLLECTION_NAME,
     DENSE_SIZE,
@@ -20,20 +25,20 @@ def create_collection():
     (Re)create the hybrid collection: one named dense vector and one
     named sparse (BM25) vector per point, plus a payload index on
     access_roles so role filtering runs at the vector-store level.
+
+    Embedded (on-disk) Qdrant does not reliably drop existing points
+    via delete_collection / recreate_collection, which silently
+    leaves stale vectors behind. To guarantee a clean rebuild we
+    remove the storage directory before recreating the collection.
     """
+
+    storage = Path(QDRANT_PATH)
+    if storage.exists():
+        shutil.rmtree(storage)
 
     client = get_qdrant_client()
 
     try:
-        # Explicit delete-then-create. recreate_collection is
-        # deprecated and, in local (on-disk) mode, does not reliably
-        # purge existing points when the vector schema changes —
-        # which silently leaves stale vectors behind.
-        try:
-            client.delete_collection(collection_name=COLLECTION_NAME)
-        except (UnexpectedResponse, ValueError):
-            pass
-
         client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config={
