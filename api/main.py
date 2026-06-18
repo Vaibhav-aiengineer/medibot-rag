@@ -172,7 +172,7 @@ def chat(request: ChatRequest):
     chunks = retrieve(
         question=request.question,
         role=request.role,
-        top_k=5
+        top_k=3
     )
 
     if not chunks:

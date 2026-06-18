@@ -1,23 +1,32 @@
-from search import search
+"""
+Smoke test for role-based access control at the vector-store level.
 
-question = "What is the standard dose of Amoxicillin?"
+A nurse must never receive billing/clinical-only chunks; a billing
+executive must be able to reach billing content.
+"""
 
-results = search(
-    question=question,
-    role="billing",
-    top_k=5
-)
+from retrieval.rag_retriever import retrieve
 
-print(f"Results: {len(results)}")
 
-for result in results:
+def collections_for(question, role):
+    results = retrieve(question, role, top_k=3)
+    return {r["metadata"]["collection"] for r in results}
 
-    print("\n----------------")
 
-    print(
-        result.payload["document"]
-    )
+def main():
 
-    print(
-        result.payload["text"][:200]
-    )
+    billing_q = "What is the billing package for STEMI?"
+
+    nurse_cols = collections_for(billing_q, "nurse")
+    print(f"nurse -> billing question: {nurse_cols or 'NONE'}")
+    assert "billing" not in nurse_cols, "RBAC LEAK: nurse saw billing"
+
+    billing_cols = collections_for(billing_q, "billing_executive")
+    print(f"billing_executive -> billing question: {billing_cols or 'NONE'}")
+    assert "billing" in billing_cols, "billing_executive cannot reach billing"
+
+    print("\nRBAC OK")
+
+
+if __name__ == "__main__":
+    main()

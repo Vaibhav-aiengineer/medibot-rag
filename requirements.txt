@@ -1,0 +1,21 @@
+# Document ingestion & chunking
+docling==2.101.0
+
+# Vector store + hybrid (dense + sparse) search
+qdrant-client==1.18.0
+
+# Dense embeddings + cross-encoder reranker
+sentence-transformers==5.5.1
+transformers==5.11.0
+
+# Sparse (BM25) embeddings for hybrid retrieval.
+# onnxruntime is pinned: 1.27.0 fails to load its DLL on Windows
+# (onnxruntime_pybind11_state init failure); 1.18.1 is stable.
+fastembed==0.8.0
+onnxruntime==1.18.1
+
+# API + LLM
+fastapi==0.137.1
+uvicorn==0.49.0
+groq==1.4.0
+python-dotenv==1.2.2

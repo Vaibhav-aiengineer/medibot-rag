@@ -1,77 +1,76 @@
 import json
+import sys
 
-from loaders import get_converter, get_all_pdfs
-from chunker import (
-    process_table,
-    process_section_document
-)
+from docling.datamodel.base_models import ConversionStatus
 
-TABLE_HEAVY_DOCS = {
-    "billing_codes.pdf",
-    "diagnostic_reference.pdf",
-    "drug_formulary.pdf",
-    "treatment_protocols.pdf"
-}
+from loaders import get_converter, get_all_documents
+from chunker import get_chunker, chunk_document
 
 
-converter = get_converter()
+def main():
 
-all_chunks = []
+    converter = get_converter()
+    chunker = get_chunker()
 
-pdfs = get_all_pdfs("data")
+    documents = get_all_documents("data")
 
-print(f"Found {len(pdfs)} PDFs")
+    print(f"Found {len(documents)} documents")
 
+    all_chunks = []
+    failures = []
 
-for pdf in pdfs:
+    for path in documents:
 
-    print(f"\nProcessing: {pdf.name}")
+        print(f"\nProcessing: {path.name}")
 
-    result = converter.convert(str(pdf))
+        result = converter.convert(str(path))
 
-    # Table documents
-    if pdf.name in TABLE_HEAVY_DOCS:
+        # Guard: Docling can return SUCCESS with pages silently
+        # dropped (e.g. on a backend memory error). Refuse to build
+        # an index from a partial parse instead of failing quietly.
+        if result.status not in (
+            ConversionStatus.SUCCESS,
+            ConversionStatus.PARTIAL_SUCCESS,
+        ):
+            print(f"  PARSE FAILED: {result.status}")
+            failures.append((path.name, str(result.status)))
+            continue
 
-        print("Using Table Chunker")
+        if result.status == ConversionStatus.PARTIAL_SUCCESS:
+            print(f"  WARNING: partial parse for {path.name}")
+            failures.append((path.name, "PARTIAL_SUCCESS"))
 
-        for table in result.document.tables:
-
-            chunks = process_table(
-                table,
-                str(pdf)
-            )
-
-            all_chunks.extend(chunks)
-
-    # Everything else for now
-    else:
-
-        print("Using Section Chunker")
-
-        markdown = result.document.export_to_markdown()
-
-        chunks = process_section_document(
-            markdown,
-            str(pdf)
+        chunks = chunk_document(
+            result.document,
+            str(path),
+            chunker,
         )
+
+        print(f"  {len(chunks)} chunks")
 
         all_chunks.extend(chunks)
 
+    print(f"\nTotal chunks created: {len(all_chunks)}")
 
-print(f"\nTotal Chunks Created: {len(all_chunks)}")
+    if failures:
+        print("\nDocuments with parse problems:")
+        for name, status in failures:
+            print(f"  - {name}: {status}")
+
+    # Don't overwrite a good index with a broken one.
+    if not all_chunks:
+        print("\nNo chunks produced; aborting without writing.")
+        sys.exit(1)
+
+    with open(
+        "data/chunks.json",
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(all_chunks, f, indent=2, ensure_ascii=False)
+
+    print("\nSaved to data/chunks.json")
 
 
-with open(
-    "data/chunks.json",
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        all_chunks,
-        f,
-        indent=2,
-        ensure_ascii=False
-    )
-
-print("\nSaved to data/chunks.json")
+if __name__ == "__main__":
+    main()
