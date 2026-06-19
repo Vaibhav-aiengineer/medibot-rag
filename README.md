@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # 🏥 MediBot — Hospital Knowledge Assistant
 
@@ -573,4 +573,4 @@ curl -X POST http://localhost:8000/chat \
 **Built with ❤️ for healthcare knowledge management**
 
 </div>
-]]>
+
